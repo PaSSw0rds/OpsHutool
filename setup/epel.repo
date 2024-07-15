@@ -1,0 +1,5 @@
+[epel]
+name=epel
+baseurl=https://mirrors.ustc.edu.cn/epel/$releasever/$basearch/
+enabled=1
+gpgcheck=0
