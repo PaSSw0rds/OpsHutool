@@ -1,0 +1,16 @@
+FROM centos:7
+ENV container docker
+USER root
+RUN rm -f /etc/yum.repos.d/*
+ADD centos.repo /etc/yum.repos.d/centos.repo
+ADD epel.repo /etc/yum.repos.d/epel.repo
+# 模拟 CentOS
+RUN yum makecache && \
+    yum install -y which openssl
+# 模拟 正式环境预安装执行startup.sh && 节省时间安装yum
+RUN yum install -y gcc perl-devel gcc openssl-devel bzip2-devel libffi-devel
+ADD . /TRS/baseline/
+RUN /bin/bash /TRS/baseline/startup.sh
+#
+WORKDIR /TRS/baseline
+CMD [ "/bin/bash","startup.sh" ]
