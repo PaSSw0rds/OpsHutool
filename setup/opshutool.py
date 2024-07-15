@@ -6,6 +6,9 @@ import click
 import logging
 from rich.logging import RichHandler
 from rich.console import Console
+from rich.prompt import Prompt
+from rich.prompt import Confirm
+from utils.utils import insert_before_line as before, insert_after_line as after, replace_line as replace
 
 os.system("clear")
 FORMAT = "%(message)s"
@@ -13,7 +16,10 @@ logging.basicConfig(
     level="NOTSET",
     format=FORMAT,
     datefmt="[%X]",
-    handlers=[RichHandler(rich_tracebacks=True, tracebacks_show_locals=True, tracebacks_suppress=[click])],
+    handlers=[
+        RichHandler(omit_repeated_times=False, show_path=False, enable_link_path=False, rich_tracebacks=True,
+                    tracebacks_show_locals=True,
+                    tracebacks_suppress=[click])],
 )
 
 log = logging.getLogger("rich")
@@ -71,6 +77,41 @@ check_system_support()
 """
 os.system("mkdir -p /TRS/baseline/backup")
 os.system("mkdir -p /var/log/.history")
+
+console.rule("用户安全", align="left")
+try:
+    pam = subprocess.check_call(["rpm", "--quiet", "-q", "pam"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    log.info("[*] 不允许用户重复使用最近的密码")
+    f = open('/etc/pam.d/system-auth', 'r+')
+    with open('/etc/pam.d/system-auth', 'r') as systemauth:
+        start, end, incorrect, index, presence, correct = 0, 0, 0, 0, False, False
+        pattern_presence = re.compile(r"^\s*password\s+(?:(?:requisite)|(?:required))\s+pam_pwhistory\.so.*$")
+        pattern_correct = re.compile(r"^\s*password\b.*\bpam_pwhistory\.so\b.*\bremember=([0-9]*).*$")
+        for line in systemauth:
+            if presence is True and correct is True:
+                break
+            index += 1
+            # find first line
+            if line.startswith("password") and start == 0:
+                start = index
+            # find end line
+            if line.startswith("password") and "pam_deny.so" in line and end == 0:
+                end = index
+            if pattern_presence.match(line):
+                presence = True
+            if pattern_correct.match(line):
+                correct = True
+        pass
+        if presence is False:
+            log.warning("[-] 未找到 pam_pwhistory.so！")
+        if presence is True and correct is False:
+            log.warning("[-] 找到 pam_pwhistory.so，但是配置不正确")
+            pass
+        else:
+            log.info("[-] pam_unix2.so 已经设置了 remember 参数")
+
+except subprocess.CalledProcessError:
+    pass
 
 """
 供应商安全
