@@ -1,0 +1,13 @@
+# centos 7 基线测试镜像
+FROM centos:7
+ENV container docker
+USER root
+RUN rm -f /etc/yum.repos.d/*
+ADD centos.repo /etc/yum.repos.d/centos.repo
+ADD epel.repo /etc/yum.repos.d/epel.repo
+# 模拟 CentOS
+RUN yum makecache && \
+    yum install -y which openssl
+ADD . /TRS/baseline/
+WORKDIR /TRS/baseline
+ENTRYPOINT [ "./startup.sh" ]
