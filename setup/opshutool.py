@@ -2,8 +2,12 @@
 import re
 import subprocess
 import os
+import time
+
 import click
 import logging
+
+import rich
 from rich.logging import RichHandler
 from rich.console import Console
 from rich.prompt import Prompt
@@ -11,19 +15,20 @@ from rich.prompt import Confirm
 from utils.utils import insert_before_line as before, insert_after_line as after, replace_line as replace
 
 os.system("clear")
+console = Console(record=True)
 FORMAT = "%(message)s"
 logging.basicConfig(
     level="NOTSET",
     format=FORMAT,
     datefmt="[%X]",
     handlers=[
-        RichHandler(omit_repeated_times=False, show_path=False, enable_link_path=False, rich_tracebacks=True,
+        RichHandler(console=console, omit_repeated_times=False, show_path=False, enable_link_path=False, rich_tracebacks=False,
                     tracebacks_show_locals=True,
                     tracebacks_suppress=[click])],
 )
 
 log = logging.getLogger("rich")
-console = Console()
+thistime = str(time.strftime("%Y%m%d%H%M", time.localtime()))
 
 
 def check_system_support():
@@ -149,3 +154,6 @@ except PermissionError as e:
     log.error("Failed to read /etc/passwd: %s" % e)
 
 log.info("[-] 配置满足策略的root管理员密码")
+
+
+console.save_html('opslogs.html')
