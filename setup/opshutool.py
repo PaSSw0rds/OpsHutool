@@ -87,6 +87,15 @@ os.system("clear")
 console.rule("用户安全", align="left")
 try:
     subprocess.check_call(["rpm", "-q", "pam"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+except subprocess.CalledProcessError:
+    log.error("[×] 系统不存在PAM！")
+    exit(0)
+
+try:
+    if int(subprocess.run("ls /lib{,64}/security/ | grep 'pam_pwhistory.so' | wc -l", shell=True, capture_output=True,
+                          text=True).stdout) == 0:
+        log.error("[×] 未找到 pam_unix.so！")
+        exit()
     log.info("[*] 不允许用户重复使用最近的密码（无限期追溯）")
     f = open('/etc/pam.d/system-auth', 'r+')
     with open('/etc/pam.d/system-auth', 'r') as systemauth:
