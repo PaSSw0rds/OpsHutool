@@ -2,8 +2,12 @@
 import re
 import subprocess
 import os
+import time
+
 import click
 import logging
+
+import rich
 from rich.logging import RichHandler
 from rich.console import Console
 from rich.prompt import Prompt
@@ -11,34 +15,36 @@ from rich.prompt import Confirm
 from utils.utils import insert_before_line as before, insert_after_line as after, replace_line as replace
 
 os.system("clear")
+console = Console(record=True)
 FORMAT = "%(message)s"
 logging.basicConfig(
     level="NOTSET",
     format=FORMAT,
     datefmt="[%X]",
     handlers=[
-        RichHandler(omit_repeated_times=False, show_path=False, enable_link_path=False, rich_tracebacks=True,
+        RichHandler(console=console, omit_repeated_times=False, show_path=False, enable_link_path=False, rich_tracebacks=False,
                     tracebacks_show_locals=True,
                     tracebacks_suppress=[click])],
 )
 
 log = logging.getLogger("rich")
-console = Console()
+thistime = str(time.strftime("%Y%m%d%H%M", time.localtime()))
 
 
 def check_system_support():
     """
     Check if the current system is supported.
     """
-    with open('/etc/os-release', 'r') as f:
+    with open('/etc/os-release', 'r') as os:
         flag = False
-        for line in f:
+        for line in os:
             if "ROCKY" in line.upper() or "CENTOS" in line.upper():
                 flag = True
                 break
         if not flag:
             print("系统不支持")
             exit(0)
+        os.close()
 
 
 check_system_support()
@@ -77,18 +83,27 @@ check_system_support()
 """
 os.system("mkdir -p /TRS/baseline/backup")
 os.system("mkdir -p /var/log/.history")
-
+os.system("clear")
 console.rule("用户安全", align="left")
 try:
-    pam = subprocess.check_call(["rpm", "--quiet", "-q", "pam"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-    log.info("[*] 不允许用户重复使用最近的密码")
+    subprocess.check_call(["rpm", "-q", "pam"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+except subprocess.CalledProcessError:
+    log.error("[×] 系统不存在PAM！")
+    exit(0)
+
+try:
+    if int(subprocess.run("ls /lib{,64}/security/ | grep 'pam_pwhistory.so' | wc -l", shell=True, capture_output=True,
+                          text=True).stdout) == 0:
+        log.error("[×] 未找到 pam_unix.so！")
+        exit()
+    log.info("[*] 不允许用户重复使用最近的密码（无限期追溯）")
     f = open('/etc/pam.d/system-auth', 'r+')
     with open('/etc/pam.d/system-auth', 'r') as systemauth:
         start, end, incorrect, index, presence, correct = 0, 0, 0, 0, False, False
         pattern_presence = re.compile(r"^\s*password\s+(?:(?:requisite)|(?:required))\s+pam_pwhistory\.so.*$")
         pattern_correct = re.compile(r"^\s*password\b.*\bpam_pwhistory\.so\b.*\bremember=([0-9]*).*$")
         for line in systemauth:
-            if presence is True and correct is True:
+            if presence is True and correct is True and start != 0 and end != 0:
                 break
             index += 1
             # find first line
@@ -99,19 +114,31 @@ try:
                 end = index
             if pattern_presence.match(line):
                 presence = True
+                start = index
             if pattern_correct.match(line):
                 correct = True
-        pass
-        if presence is False:
-            log.warning("[-] 未找到 pam_pwhistory.so！")
+        pam_pwhistory = subprocess.run(['sed', '-n', '{0},{1}p'.format(start, end), '/etc/pam.d/system-auth'],
+                                       capture_output=True, text=True)
+        log.info(pam_pwhistory.stdout)
+        os.system(
+            'mkdir -p /TRS/baseline/backup/{0}/etc/pam.d && cp /etc/pam.d/system-auth /TRS/baseline/backup/{0}/etc/pam.d/system-auth'.format(
+                thistime))
         if presence is True and correct is False:
             log.warning("[-] 找到 pam_pwhistory.so，但是配置不正确")
+            if Confirm.ask("修复吗？", default=True):
+                replace('/etc/pam.d/system-auth', start, 'password\trequired\tpam_pwhistory.so\tremember=5')
             pass
+        elif presence is False:
+            log.warning("[-] 未找到 pam_pwhistory.so！")
+            if Confirm.ask("修复吗？", default=True):
+                before('/etc/pam.d/system-auth', end, 'password\trequired\tpam_pwhistory.so\tremember=5')
         else:
             log.info("[-] pam_unix2.so 已经设置了 remember 参数")
 
 except subprocess.CalledProcessError:
     pass
+
+
 
 """
 供应商安全
@@ -149,3 +176,6 @@ except PermissionError as e:
     log.error("Failed to read /etc/passwd: %s" % e)
 
 log.info("[-] 配置满足策略的root管理员密码")
+
+
+console.save_html('opslogs.html')
