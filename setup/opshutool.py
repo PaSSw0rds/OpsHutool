@@ -4,15 +4,17 @@ import subprocess
 import os
 import time
 
-import click
 import logging
 
-import rich
+from rich import print
 from rich.logging import RichHandler
 from rich.console import Console
 from rich.prompt import Prompt
 from rich.prompt import Confirm
-from utils.utils import insert_before_line as before, insert_after_line as after, replace_line as replace
+from utils.utils import (insert_before_line as before,
+                         insert_after_line as after,
+                         replace_line as replace,
+                         delete_line as delete)
 
 os.system("clear")
 console = Console(record=True)
@@ -22,9 +24,9 @@ logging.basicConfig(
     format=FORMAT,
     datefmt="[%X]",
     handlers=[
-        RichHandler(console=console, omit_repeated_times=False, show_path=False, enable_link_path=False, rich_tracebacks=False,
-                    tracebacks_show_locals=True,
-                    tracebacks_suppress=[click])],
+        RichHandler(console=console, omit_repeated_times=False, show_path=False, enable_link_path=False,
+                    rich_tracebacks=False,
+                    tracebacks_show_locals=True)],
 )
 
 log = logging.getLogger("rich")
@@ -94,10 +96,12 @@ except subprocess.CalledProcessError:
 try:
     if int(subprocess.run("ls /lib{,64}/security/ | grep 'pam_pwhistory.so' | wc -l", shell=True, capture_output=True,
                           text=True).stdout) == 0:
-        log.error("[×] 未找到 pam_unix.so！")
+        log.error("[×] 未找到 pam_pwhistory.so！")
         exit()
     log.info("[*] 不允许用户重复使用最近的密码（无限期追溯）")
-    f = open('/etc/pam.d/system-auth', 'r+')
+    os.system(
+        'mkdir -p /TRS/baseline/backup/{0}/etc/pam.d && cp /etc/pam.d/system-auth /TRS/baseline/backup/{0}/etc/pam.d/system-auth'.format(
+            thistime))
     with open('/etc/pam.d/system-auth', 'r') as systemauth:
         start, end, incorrect, index, presence, correct = 0, 0, 0, 0, False, False
         pattern_presence = re.compile(r"^\s*password\s+(?:(?:requisite)|(?:required))\s+pam_pwhistory\.so.*$")
@@ -120,26 +124,58 @@ try:
         pam_pwhistory = subprocess.run(['sed', '-n', '{0},{1}p'.format(start, end), '/etc/pam.d/system-auth'],
                                        capture_output=True, text=True)
         log.info(pam_pwhistory.stdout)
-        os.system(
-            'mkdir -p /TRS/baseline/backup/{0}/etc/pam.d && cp /etc/pam.d/system-auth /TRS/baseline/backup/{0}/etc/pam.d/system-auth'.format(
-                thistime))
         if presence is True and correct is False:
             log.warning("[-] 找到 pam_pwhistory.so，但是配置不正确")
-            if Confirm.ask("修复吗？", default=True):
-                replace('/etc/pam.d/system-auth', start, 'password\trequired\tpam_pwhistory.so\tremember=5')
+            replace('/etc/pam.d/system-auth', start, 'password\trequired\tpam_pwhistory.so\tremember=5')
             pass
         elif presence is False:
             log.warning("[-] 未找到 pam_pwhistory.so！")
-            if Confirm.ask("修复吗？", default=True):
-                before('/etc/pam.d/system-auth', end, 'password\trequired\tpam_pwhistory.so\tremember=5')
+            before('/etc/pam.d/system-auth', end, 'password\trequired\tpam_pwhistory.so\tremember=5')
         else:
             log.info("[-] pam_unix2.so 已经设置了 remember 参数")
 
 except subprocess.CalledProcessError:
     pass
 
+try:
+    if int(subprocess.run("ls /lib{,64}/security/ | grep 'pam_unix.so' | wc -l", shell=True, capture_output=True,
+                          text=True).stdout) == 0:
+        log.error("[×] 未找到 pam_unix.so！")
+        exit()
+    log.info("[*] 用户凭证提供错误过多的时候进行锁定")
+    os.system(
+        'mkdir -p /TRS/baseline/backup/{0}/etc/pam.d && cp /etc/pam.d/system-auth /TRS/baseline/backup/{0}/etc/pam.d/system-auth'.format(
+            thistime))
+    """
+    判断模块出现次数
+    """
+    with open('/etc/pam.d/system-auth', 'r') as systemauth:
+        lines = systemauth.readlines()
+        times = [i for i, item in enumerate(lines) if re.search("^[\s]*auth\s+.+pam_unix\.so", item)]
+        if times.__len__() <= 0:
+            log.warning("[-] 在system-auth找不到pam_unix.so")
+            pass
+        elif times.__len__() > 1:
+            log.warning("[-] 在system-auth>auth 中发现两次pam_unix.so")
+            #delete('/etc/pam.d/system-auth', times[int(Prompt.ask("删除第几个？（从1开始计数）"))])
+
+    with open('/etc/pam.d/password-auth', 'r') as passwordauth:
+        lines = passwordauth.readlines()
+        cursor = 0
+        times = [i for i, item in enumerate(lines) if re.search("^[\s]*auth\s+.+pam_unix\.so", item)]
+        if times.__len__() <= 0:
+            log.warning("[-] 在password-auth找不到pam_unix.so")
+            cursor = [i for i, item in enumerate(lines) if item.__contains__("pam_env.so")]
+
+        elif times.__len__() > 1:
+            log.warning("[-] 在password-auth>auth 中发现两次pam_unix.so")
+            delete('/etc/pam.d/system-auth', times[int(Prompt.ask("删除第几个？（从1开始计数）"))])
 
 
+
+
+except subprocess.CalledProcessError:
+    pass
 """
 供应商安全
 """
@@ -176,6 +212,5 @@ except PermissionError as e:
     log.error("Failed to read /etc/passwd: %s" % e)
 
 log.info("[-] 配置满足策略的root管理员密码")
-
 
 console.save_html('opslogs.html')

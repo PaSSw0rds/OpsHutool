@@ -1,8 +1,6 @@
 # 运维基线
 在做运维的时候，经常会需要做漏扫和等保合规，目前有很多工具可以对服务器进行基线扫描，例如最著名的OpenSCAP，他是一个对服务器进行基线扫描的开源工具。
-> OpenSCAP (OSCAP) is an open-source utility that can use a SCAP Security Guide (SSG) profile as a basis for testing security compliance. .
-> 
-> OpenSCAP（OSCAP）是一个开源实用程序，可以使用SCAP安全指南（SSG）配置文件作为测试安全合规性的基础。
+> OpenSCAP (OSCAP) is an open-source utility that can use a SCAP Security Guide (SSG) profile as a basis for testing security compliance. You can use the OSCAP utilities with Oracle Linux to automate compliance testing.
 
 毫无疑问的是，OSCAP 是目前最好的基线扫描并提供修复建议和生成修复脚本的工具，本工具**不指望也不能够**能够替代该开源工具。本项目核心仅仅是为了自己偷懒，能在未来维护上保持服务器安全基线一致，减少人工的机械操作。
 
@@ -38,4 +36,4 @@
 ```
 
 ## 更新日志
-· 2024-07-15    编写README.md
+- 2024-07-15    编写README.md

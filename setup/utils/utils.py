@@ -61,3 +61,24 @@ def replace_line(file_path, line_number, new_content):
     # 将修改后的内容写回文件
     with open(file_path, 'w', encoding='utf-8') as file:
         file.writelines(lines)
+
+
+def delete_line(file_path, line_number):
+    """删除文件中指定行的内容。
+
+    Args:
+        file_path (str): 文件路径。
+        line_number (int): 要删除内容的行号（从1开始计数）。
+    """
+    with open(file_path, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+
+    # 检查行号是否有效
+    if line_number < 1 or line_number > len(lines):
+        raise ValueError("Line number is out of range.")
+
+    # 将修改后的内容写回文件
+    with open(file_path, 'w') as file:
+        for i, line in enumerate(lines):
+            if i != line_number - 1:
+                file.write(line)
