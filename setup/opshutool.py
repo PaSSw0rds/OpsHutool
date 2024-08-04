@@ -9,6 +9,7 @@ import logging
 from rich import print
 from rich.logging import RichHandler
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.prompt import Prompt
 from rich.prompt import Confirm
 from utils.utils import (insert_before_line as before,
@@ -20,7 +21,7 @@ os.system("clear")
 console = Console(record=True)
 FORMAT = "%(message)s"
 logging.basicConfig(
-    level="NOTSET",
+    level="INFO",
     format=FORMAT,
     datefmt="[%X]",
     handlers=[
@@ -41,6 +42,8 @@ def check_system_support():
         flag = False
         for line in os:
             if "ROCKY" in line.upper() or "CENTOS" in line.upper():
+                global SYSTEM
+                SYSTEM = "REDHAT"
                 flag = True
                 break
         if not flag:
@@ -51,41 +54,41 @@ def check_system_support():
 
 check_system_support()
 
-# try:
-#     subprocess.check_call(["ansible", "--version"])
-# except OSError:
-#     """
-#     安装 ansible、setuptools
-#     """
-#     subprocess.call(["tar", "-xzvf", "Docker/rpm/ansible_rpm.tar.gz", "-C", "Docker/rpm/"])
-#     os.system("rpm -Uvh Docker/rpm/ansible_rpm/*.rpm --force")
-#     subprocess.check_call(["ansible", "--version"])
-
-"""
-安装密钥免密
-"""
-# try:
-#     os.system("rm -f /root/.ssh/baseline*")
-#     subprocess.call("ssh-keygen -b 2048 -t rsa -f /root/.ssh/baseline -q -N ''", shell=True)
-#     os.system("cat /root/.ssh/baseline.pub >> /root/.ssh/authorized_keys")
-#     os.system("cat /root/.ssh/baseline.pub >> /TRS/baseline/venv/env/ssh_key")
-#     content = """
-#     Host localhost
-#         StrictHostKeyChecking no
-#         UserKnownHostsFile=/dev/null
-#         PubkeyAuthentication yes
-#     """
-#     with open("/root/.ssh/config", "w") as f:
-#         f.write(content)
-# except OSError:
-#     pass
-
 """
 创建备份目录、审计日志目录
 """
-os.system("mkdir -p /TRS/baseline/backup")
+console.rule("操作审计", align="left")
 os.system("mkdir -p /var/log/.history")
 os.system("clear")
+try:
+    subprocess.check_call(["rpm", "-q", "audit"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+except subprocess.CalledProcessError:
+    log.info("[×] 系统不存在audit，尝试安装……")
+    try:
+        subprocess.check_call(["yum", "-y", "install", "audit"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        log.error("[×] 安装audit失败！")
+    exit(0)
+try:
+    subprocess.check_call(["auditctl", "-D"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    comm = [
+        'egrep -q "max_log_file[^_].*=" {RULES_CONF} && sed -ri "s/.*max_log_file[^_].*=*/max_log_file=999/" {RULES_CONF} || echo "max_log_file=999" >> {RULES_CONF}',
+        'egrep -q "max_log_file[_].*=" {RULES_CONF} && sed -ri "s/.*max_log_file[_].*=*/max_log_file_action=keep_logs/" {RULES_CONF} || echo "max_log_file_action=keep_logs" >> {RULES_CONF}'
+        'echo "-w /etc/shadow -p wa -k password_change" >> {RULES_FILE}',
+        'echo "-w /etc/selinux/ -p wa -k selinux_change" >> {RULES_FILE}',
+        'echo "-w /sbin/insmod -p x -k module_change" >> {RULES_FILE}',
+        'echo "-w /sbin/rmmod -p x -k module_change" >> {RULES_FILE}',
+        'echo "-w /sbin/modprobe -p x -k module_change" >> {RULES_FILE}',
+        'echo "-w /var/log/wtmp -p wa -k logins" >> {RULES_FILE}',
+        'echo "-w /var/run/utmp -p wa -k sessions" >> {RULES_FILE}',
+        'echo "-w /var/log/btmp -p wa -k logouts" >> {RULES_FILE}',
+        'echo "-a always,exit -F arch=b64 -S execve -k commands" >> {RULES_FILE} ']
+    for e in comm:
+        os.system(e.format(RULES_FILE="/etc/audit/rules.d/audit.rules", RULES_CONF="/etc/audit/auditd.conf"))
+except subprocess.CalledProcessError:
+    log.error("[×] 安装audit失败！")
+    exit(0)
+
 console.rule("用户安全", align="left")
 try:
     subprocess.check_call(["rpm", "-q", "pam"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
@@ -93,89 +96,16 @@ except subprocess.CalledProcessError:
     log.error("[×] 系统不存在PAM！")
     exit(0)
 
-try:
-    if int(subprocess.run("ls /lib{,64}/security/ | grep 'pam_pwhistory.so' | wc -l", shell=True, capture_output=True,
-                          text=True).stdout) == 0:
-        log.error("[×] 未找到 pam_pwhistory.so！")
-        exit()
-    log.info("[*] 不允许用户重复使用最近的密码（无限期追溯）")
-    os.system(
-        'mkdir -p /TRS/baseline/backup/{0}/etc/pam.d && cp /etc/pam.d/system-auth /TRS/baseline/backup/{0}/etc/pam.d/system-auth'.format(
-            thistime))
-    with open('/etc/pam.d/system-auth', 'r') as systemauth:
-        start, end, incorrect, index, presence, correct = 0, 0, 0, 0, False, False
-        pattern_presence = re.compile(r"^\s*password\s+(?:(?:requisite)|(?:required))\s+pam_pwhistory\.so.*$")
-        pattern_correct = re.compile(r"^\s*password\b.*\bpam_pwhistory\.so\b.*\bremember=([0-9]*).*$")
-        for line in systemauth:
-            if presence is True and correct is True and start != 0 and end != 0:
-                break
-            index += 1
-            # find first line
-            if line.startswith("password") and start == 0:
-                start = index
-            # find end line
-            if line.startswith("password") and "pam_deny.so" in line and end == 0:
-                end = index
-            if pattern_presence.match(line):
-                presence = True
-                start = index
-            if pattern_correct.match(line):
-                correct = True
-        pam_pwhistory = subprocess.run(['sed', '-n', '{0},{1}p'.format(start, end), '/etc/pam.d/system-auth'],
-                                       capture_output=True, text=True)
-        log.info(pam_pwhistory.stdout)
-        if presence is True and correct is False:
-            log.warning("[-] 找到 pam_pwhistory.so，但是配置不正确")
-            replace('/etc/pam.d/system-auth', start, 'password\trequired\tpam_pwhistory.so\tremember=5')
-            pass
-        elif presence is False:
-            log.warning("[-] 未找到 pam_pwhistory.so！")
-            before('/etc/pam.d/system-auth', end, 'password\trequired\tpam_pwhistory.so\tremember=5')
-        else:
-            log.info("[-] pam_unix2.so 已经设置了 remember 参数")
+log.info("[-] 用户口令复杂性策略设置")
+console.print(Markdown("""- 密码过期周期0~90
+- 到期前15天提示
+- 密码长度至少8
+- 复杂度设置至少有一个大小写、数字、特殊字符
+- 密码三次不能一样
+- 尝试次数为三次)
+"""))
 
-except subprocess.CalledProcessError:
-    pass
-
-try:
-    if int(subprocess.run("ls /lib{,64}/security/ | grep 'pam_unix.so' | wc -l", shell=True, capture_output=True,
-                          text=True).stdout) == 0:
-        log.error("[×] 未找到 pam_unix.so！")
-        exit()
-    log.info("[*] 用户凭证提供错误过多的时候进行锁定")
-    os.system(
-        'mkdir -p /TRS/baseline/backup/{0}/etc/pam.d && cp /etc/pam.d/system-auth /TRS/baseline/backup/{0}/etc/pam.d/system-auth'.format(
-            thistime))
-    """
-    判断模块出现次数
-    """
-    with open('/etc/pam.d/system-auth', 'r') as systemauth:
-        lines = systemauth.readlines()
-        times = [i for i, item in enumerate(lines) if re.search("^[\s]*auth\s+.+pam_unix\.so", item)]
-        if times.__len__() <= 0:
-            log.warning("[-] 在system-auth找不到pam_unix.so")
-            pass
-        elif times.__len__() > 1:
-            log.warning("[-] 在system-auth>auth 中发现两次pam_unix.so")
-            #delete('/etc/pam.d/system-auth', times[int(Prompt.ask("删除第几个？（从1开始计数）"))])
-
-    with open('/etc/pam.d/password-auth', 'r') as passwordauth:
-        lines = passwordauth.readlines()
-        cursor = 0
-        times = [i for i, item in enumerate(lines) if re.search("^[\s]*auth\s+.+pam_unix\.so", item)]
-        if times.__len__() <= 0:
-            log.warning("[-] 在password-auth找不到pam_unix.so")
-            cursor = [i for i, item in enumerate(lines) if item.__contains__("pam_env.so")]
-
-        elif times.__len__() > 1:
-            log.warning("[-] 在password-auth>auth 中发现两次pam_unix.so")
-            delete('/etc/pam.d/system-auth', times[int(Prompt.ask("删除第几个？（从1开始计数）"))])
-
-
-
-
-except subprocess.CalledProcessError:
-    pass
+pass
 """
 供应商安全
 """
